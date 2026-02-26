@@ -1,0 +1,121 @@
+{
+  "perfil_pessoal": {
+    "nome": "Leonardo Alves",
+    "idade": null,
+    "cidade": "Caçapava, SP",
+    "email": "leoalvesjf@gmail.com",
+    "situacao_familiar": "Casado, 2 filhos, único provedor da família",
+    "saude": {
+      "condicao": "TDAH",
+      "impactos": [
+        "Esquece tarefas e projetos facilmente",
+        "Dificuldade de priorizar",
+        "Começa muitas coisas e não termina",
+        "Paralisia sob pressão",
+        "Precisa de estrutura externa para funcionar"
+      ]
+    },
+    "situacao_financeira": {
+      "status": "Emergência",
+      "descricao": "Endividado, precisando de renda extra urgente",
+      "meta_imediata": "Conseguir primeiro cliente freela"
+    },
+    "situacao_moradia": {
+      "problemas": ["Goteiras", "Mofo em toda a casa"]
+    }
+  },
+
+  "perfil_profissional": {
+    "empresa_atual": "Ericsson",
+    "cargo": "Product Owner / Desenvolvedor .NET",
+    "desde": "2018",
+    "descricao": "Responsável por análise de processos E2E desde entrada de produto até expedição",
+    "nivel": "Sênior",
+    "formacao": {
+      "curso": "Engenharia de Software",
+      "instituicao": "Estácio de Sá",
+      "duracao": "4 anos"
+    },
+    "habilidades_tecnicas": [
+      ".NET / VB.NET",
+      "React",
+      "TypeScript",
+      "Python",
+      "HTML / CSS / JavaScript",
+      "Power BI",
+      "Oracle",
+      "SQL",
+      "CI/CD / TFS",
+      "Git Flow",
+      "Testes automatizados"
+    ],
+    "habilidades_negocio": [
+      "Product Owner",
+      "Análise de processos E2E",
+      "Scrum / Agile",
+      "UML"
+    ],
+    "ingles": "B1 — quer evoluir para B2"
+  },
+
+  "projetos_ativos": {
+    "bot_telegram": {
+      "nome": "BabaBot_26",
+      "status": "Online — deploy feito no Railway",
+      "repositorio": "https://github.com/leoalvesjf/telegrambot.git",
+      "funcionalidades": [
+        "Bom dia automático às 7h",
+        "Boa noite automático às 22h",
+        "Adicionar tarefas via /tarefa",
+        "Listar tarefas via /lista",
+        "Marcar tarefa como feita via /feito",
+        "Respostas de encorajamento para mensagens de desânimo"
+      ],
+      "proximos_passos": [
+        "Integrar API de IA para linguagem natural",
+        "Adicionar memória persistente",
+        "Criar rotina de revisão semanal"
+      ]
+    },
+    "freelance": {
+      "plataforma": "Upwork",
+      "perfil_criado": true,
+      "titulo": "Full Stack Developer .NET & React | Power BI | Process Automation",
+      "valor_hora": "$25",
+      "status": "Perfil publicado, aguardando Connects para aplicar"
+    }
+  },
+
+  "objetivos": {
+    "curto_prazo": [
+      "Conseguir primeiro cliente freela no Upwork",
+      "Gerar renda extra para cobrir despesas básicas",
+      "Manter consistência com o bot de tarefas"
+    ],
+    "medio_prazo": [
+      "Evoluir inglês para B2",
+      "Criar canal no YouTube com conteúdo tech",
+      "Criar conteúdo para TikTok",
+      "Aumentar valor hora no Upwork para $40-50"
+    ],
+    "longo_prazo": [
+      "Estabilidade financeira para a família",
+      "Resolver problemas da moradia",
+      "Ter um assistente IA completo personalizado para TDAH"
+    ]
+  },
+
+  "instrucoes_para_assistente": {
+    "tom": "Curto, direto, humano, sem enrolação",
+    "regras": [
+      "Sempre focar em UMA coisa por vez",
+      "Nunca sobrecarregar com muita informação",
+      "Encorajar sem ser falso",
+      "Nunca julgar erros ou esquecimentos",
+      "Ajudar a dar o menor passo possível quando travado",
+      "Lembrar que progresso pequeno todo dia vence paralisação total"
+    ]
+  },
+
+  "ultima_atualizacao": "2026-02-26"
+}
