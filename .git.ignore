@@ -1,0 +1,170 @@
+# ================================
+# PYTHON
+# ================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+*.py,cover
+
+# Distribuição / build
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# ================================
+# VIRTUAL ENV
+# ================================
+
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ================================
+# PIP / POETRY / PIPENV
+# ================================
+
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Poetry
+poetry.lock
+
+# Pipenv
+Pipfile.lock
+
+# ================================
+# TESTES / COVERAGE
+# ================================
+
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.pytest_cache/
+hypothesis/
+
+# ================================
+# TYPE CHECKERS
+# ================================
+
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# ================================
+# JUPYTER
+# ================================
+
+.ipynb_checkpoints
+
+# ================================
+# IDEs
+# ================================
+
+# VSCode
+.vscode/
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# ================================
+# SISTEMA OPERACIONAL
+# ================================
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# ================================
+# DJANGO / FLASK
+# ================================
+
+*.sqlite3
+db.sqlite3
+instance/
+.webassets-cache
+
+# ================================
+# FASTAPI / UVICORN
+# ================================
+
+*.pid
+*.sock
+
+# ================================
+# DOCKER
+# ================================
+
+*.env
+.env.*
+docker-compose.override.yml
+
+# ================================
+# LOGS / TEMP
+# ================================
+
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+
+# ================================
+# DATA / UPLOADS (opcional)
+# ================================
+
+uploads/
+media/
+staticfiles/
+
+# ================================
+# SEGREDOS
+# ================================
+
+.env
+.env.local
+.env.dev
+.env.prod
+secrets.json
+config.local.py
