@@ -127,7 +127,7 @@ async def boa_noite(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text="🌙 *Dia encerrado.*\nComo foi o progresso hoje?", parse_mode='Markdown')
 
 # ============================================================
-# MAIN
+# MAIN - EXECUÇÃO ISSO É PARA GERAR O BOT NO RAILWAY
 # ============================================================
 
 def main():
