@@ -67,6 +67,7 @@ async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ Salvo no banco:\n📌 *{tarefa}*", parse_mode='Markdown')
 
+#vamos colocar IA no futuro
 async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Busca tarefas no SQLite e exibe"""
     conn = sqlite3.connect('tarefas.db')
