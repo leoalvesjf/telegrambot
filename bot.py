@@ -52,20 +52,73 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
+# async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """Salva a tarefa no SQLite"""
+#     if not context.args:
+#         await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Revisar Upwork")
+#         return
+
+#     tarefa = ' '.join(context.args)
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+#     cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
+#     conn.commit()
+#     conn.close()
+
+#     await update.message.reply_text(f"✅ Gravado com segurança:\n📌 *{tarefa}*", parse_mode='Markdown')
+
 async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Salva a tarefa no SQLite"""
+    """Salva a tarefa e agenda um lembrete de cobrança"""
     if not context.args:
-        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Revisar Upwork")
+        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Prospectar Upwork")
         return
 
     tarefa = ' '.join(context.args)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
+    tarefa_id = cursor.lastrowid # Pegamos o ID da tarefa que acabou de ser criada
     conn.commit()
     conn.close()
 
-    await update.message.reply_text(f"✅ Gravado com segurança:\n📌 *{tarefa}*", parse_mode='Markdown')
+    # Agenda a cobrança para daqui a 30 minutos (1800 segundos)
+    # Para testar agora, você pode mudar 1800 para 10 (10 segundos)
+    context.job_queue.run_once(
+        cobranca_automatica, 
+        when=45, 
+        data={'chat_id': update.effective_chat.id, 'tarefa': tarefa, 'id': tarefa_id}
+    )
+
+    await update.message.reply_text(
+        f"✅ Gravado: *{tarefa}*\n\n"
+        "⏳ Vou te cobrar em 30 minutos pra ver se você não se perdeu!",
+        parse_mode='Markdown'
+    )
+
+async def cobranca_automatica(context: ContextTypes.DEFAULT_TYPE):
+    """Função que o bot executa quando o timer acaba"""
+    job = context.job
+    tarefa_id = job.data['id']
+    tarefa_nome = job.data['tarefa']
+    chat_id = job.data['chat_id']
+
+    # Verifica no banco se a tarefa ainda está pendente
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT status FROM tarefas WHERE id = ?', (tarefa_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    # Se a tarefa ainda existir e NÃO estiver concluída, ele cobra
+    if row and row[0] != 'concluida':
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🔔 *CHECK-IN DE FOCO*\n\n"
+                 f"Leo, você ainda está focado em: *{tarefa_nome}*?\n\n"
+                 f"Se terminou, manda: `/feito {tarefa_id}`\n"
+                 f"Se o TDAH te levou pra outro lugar, respira e volta pra cá! ⚓",
+            parse_mode='Markdown'
+        )    
 
 async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Busca tarefas no banco persistente"""
