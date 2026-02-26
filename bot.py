@@ -5,118 +5,56 @@ from datetime import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ============================================================
-# CONFIGURAÇÕES E BANCO DE DADOS PERSISTENTE
-# ============================================================
-
+# CONFIGURAÇÕES
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-
-# Define o caminho do banco: prioriza o Volume do Railway (/app/data)
 DB_DIR = '/app/data'
 DB_PATH = os.path.join(DB_DIR, 'tarefas.db') if os.path.exists(DB_DIR) else 'tarefas.db'
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 def init_db():
-    """Cria o banco de dados e a tabela se não existirem"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tarefas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            descricao TEXT NOT NULL,
-            status TEXT DEFAULT 'pendente'
-        )
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS tarefas 
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT, descricao TEXT, status TEXT DEFAULT 'pendente')''')
     conn.commit()
     conn.close()
 
-# Inicializa o banco ao rodar o script
 init_db()
 
-# ============================================================
-# FUNÇÕES DE APOIO E AGENDAMENTO (ÂNCORA)
-# ============================================================
-
+# FUNÇÃO QUE RODA SOZINHA (O CUTUCÃO)
 async def cobranca_automatica(context: ContextTypes.DEFAULT_TYPE):
-    """Função que o bot executa quando o timer acaba"""
     job = context.job
-    tarefa_id = job.data['id']
-    tarefa_nome = job.data['tarefa']
-    chat_id = job.data['chat_id']
-
-    logging.info(f"🤖 Verificando tarefa {tarefa_id}...")
-
-    # Verifica no banco se a tarefa ainda está pendente
+    t_id, t_nome, chat_id = job.data['id'], job.data['tarefa'], job.data['chat_id']
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT status FROM tarefas WHERE id = ?', (tarefa_id,))
+    cursor.execute('SELECT status FROM tarefas WHERE id = ?', (t_id,))
     row = cursor.fetchone()
     conn.close()
 
-    # Se a tarefa ainda existir e NÃO estiver concluída, ele cobra
     if row and row[0] != 'concluida':
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🔔 *CHECK-IN DE FOCO*\n\n"
-                 f"Leo, você ainda está focado em: *{tarefa_nome}*?\n\n"
-                 f"Se terminou, manda: `/feito {tarefa_id}`\n"
-                 f"Se o TDAH te levou pra outro lugar, respira e volta pra cá! ⚓",
-            parse_mode='Markdown'
-        )
+        logging.info(f"🔔 Enviando cobrança ativa para tarefa {t_id}")
+        await context.bot.send_message(chat_id=chat_id, 
+            text=f"🔔 *CHECK-IN DE FOCO*\n\nLeo, ainda está em: *{t_nome}*?\n\nTerminou? `/feito {t_id}`\nSenão, volta pra cá! ⚓",
+            parse_mode='Markdown')
 
-async def bom_dia(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.bot_data.get('meu_chat_id')
-    if chat_id:
-        await context.bot.send_message(chat_id=chat_id, text="☀️ *Bom dia, Leonardo!*\nQual a meta única de hoje?", parse_mode='Markdown')
-
-async def boa_noite(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.bot_data.get('meu_chat_id')
-    if chat_id:
-        await context.bot.send_message(chat_id=chat_id, text="🌙 *Dia encerrado.*\nComo foi o progresso hoje?", parse_mode='Markdown')
-
-# ============================================================
-# COMANDOS DO TELEGRAM
-# ============================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Boas-vindas"""
-    chat_id = update.effective_chat.id
-    context.bot_data['meu_chat_id'] = chat_id 
-    await update.message.reply_text(
-        "👋 Leonardo pronto! Memória definitiva e cobrança ativa. 💾\n\n"
-        "📌 /tarefa — salvar algo\n"
-        "📋 /lista — ver tudo\n"
-        "✅ /feito — concluir (ex: /feito 1)\n",
-        parse_mode='Markdown'
-    )
-
+# COMANDOS
 async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Salva a tarefa e agenda um lembrete de cobrança"""
-    if not context.args:
-        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Prospectar Upwork")
-        return
-
+    if not context.args: return
     tarefa = ' '.join(context.args)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
-    tarefa_id = cursor.lastrowid
+    t_id = cursor.lastrowid
     conn.commit()
     conn.close()
 
-    # Agenda a cobrança para daqui a 45 segundos para teste
-    context.job_queue.run_once(
-        cobranca_automatica, 
-        when=45, 
-        data={'chat_id': update.effective_chat.id, 'tarefa': tarefa, 'id': tarefa_id}
-    )
-
-    await update.message.reply_text(
-        f"✅ Gravado: *{tarefa}*\n\n"
-        "⏳ Vou te cobrar em 45 segundos para testarmos!",
-        parse_mode='Markdown'
-    )
+    # Agendando 30 segundos para o teste de fogo
+    context.job_queue.run_once(cobranca_automatica, when=30, 
+                               data={'chat_id': update.effective_chat.id, 'tarefa': tarefa, 'id': t_id})
+    
+    await update.message.reply_text(f"✅ Gravado: *{tarefa}*\n⏳ Ativei meu cronômetro interno. Te chamo em 30s!", parse_mode='Markdown')
 
 async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_PATH)
@@ -124,53 +62,30 @@ async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute('SELECT id, descricao, status FROM tarefas')
     rows = cursor.fetchall()
     conn.close()
-    if not rows:
-        await update.message.reply_text("Sua lista está limpa!")
-        return
-    texto = "📋 *Tarefas Guardadas:* \n\n"
-    for row in rows:
-        emoji = "✅" if row[2] == 'concluida' else "⏳"
-        texto += f"{emoji} {row[0]}. {row[1]}\n"
-    await update.message.reply_text(texto, parse_mode='Markdown')
+    res = "📋 *Tarefas:*\n" + "\n".join([f"{'✅' if r[2]=='concluida' else '⏳'} {r[0]}. {r[1]}" for r in rows])
+    await update.message.reply_text(res or "Vazio", parse_mode='Markdown')
 
 async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Qual o número da tarefa?")
-        return
     try:
-        tarefa_id = int(context.args[0])
+        t_id = int(context.args[0])
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("UPDATE tarefas SET status = 'concluida' WHERE id = ?", (tarefa_id,))
+        cursor.execute("UPDATE tarefas SET status = 'concluida' WHERE id = ?", (t_id,))
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"🎉 Boa, Leo! Tarefa {tarefa_id} concluída!")
-    except ValueError:
-        await update.message.reply_text("Mande apenas o número.")
-
-async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Recebi! 📝 Para salvar como tarefa: /tarefa " + update.message.text)
-
-# ============================================================
-# MAIN
-# ============================================================
+        await update.message.reply_text(f"🎉 Boa, Leo! Foco mantido.")
+    except: pass
 
 def main():
+    # drop_pending_updates limpa o "lixo" acumulado ao reiniciar
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("tarefa", adicionar_tarefa))
     app.add_handler(CommandHandler("lista", listar_tarefas))
     app.add_handler(CommandHandler("feito", marcar_feita))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, resposta_livre))
 
-    # Agendamentos (Horário de Brasília)
-    job_queue = app.job_queue
-    job_queue.run_daily(bom_dia, time=time(10, 0))   # 07:00 BRT
-    job_queue.run_daily(boa_noite, time=time(1, 0))  # 22:00 BRT
-
-    print(f"🤖 Bot rodando com volume em: {DB_PATH}")
-    app.run_polling()
+    print("🤖 BabaBot_26 Iniciado com JobQueue...")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
