@@ -35,65 +35,8 @@ def init_db():
 init_db()
 
 # ============================================================
-# COMANDOS DO TELEGRAM
+# FUNÇÕES DE APOIO E AGENDAMENTO (ÂNCORA)
 # ============================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Boas-vindas"""
-    chat_id = update.effective_chat.id
-    context.bot_data['meu_chat_id'] = chat_id 
-
-    await update.message.reply_text(
-        "👋 Leonardo! Memória definitiva ativada. 💾\n\n"
-        "Suas tarefas agora estão seguras no Volume do Railway.\n\n"
-        "📌 /tarefa — salvar algo\n"
-        "📋 /lista — ver tudo\n"
-        "✅ /feito — concluir (ex: /feito 1)\n",
-        parse_mode='Markdown'
-    )
-
-# async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Salva a tarefa no SQLite"""
-#     if not context.args:
-#         await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Revisar Upwork")
-#         return
-
-#     tarefa = ' '.join(context.args)
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-#     cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
-#     conn.commit()
-#     conn.close()
-
-#     await update.message.reply_text(f"✅ Gravado com segurança:\n📌 *{tarefa}*", parse_mode='Markdown')
-
-async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Salva a tarefa e agenda um lembrete de cobrança"""
-    if not context.args:
-        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Prospectar Upwork")
-        return
-
-    tarefa = ' '.join(context.args)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
-    tarefa_id = cursor.lastrowid # Pegamos o ID da tarefa que acabou de ser criada
-    conn.commit()
-    conn.close()
-
-    # Agenda a cobrança para daqui a 30 minutos (1800 segundos)
-    # Para testar agora, você pode mudar 1800 para 10 (10 segundos)
-    context.job_queue.run_once(
-        cobranca_automatica, 
-        when=45, 
-        data={'chat_id': update.effective_chat.id, 'tarefa': tarefa, 'id': tarefa_id}
-    )
-
-    await update.message.reply_text(
-        f"✅ Gravado: *{tarefa}*\n\n"
-        "⏳ Vou te cobrar em 30 minutos pra ver se você não se perdeu!",
-        parse_mode='Markdown'
-    )
 
 async def cobranca_automatica(context: ContextTypes.DEFAULT_TYPE):
     """Função que o bot executa quando o timer acaba"""
@@ -101,6 +44,8 @@ async def cobranca_automatica(context: ContextTypes.DEFAULT_TYPE):
     tarefa_id = job.data['id']
     tarefa_nome = job.data['tarefa']
     chat_id = job.data['chat_id']
+
+    logging.info(f"🤖 Verificando tarefa {tarefa_id}...")
 
     # Verifica no banco se a tarefa ainda está pendente
     conn = sqlite3.connect(DB_PATH)
@@ -118,56 +63,7 @@ async def cobranca_automatica(context: ContextTypes.DEFAULT_TYPE):
                  f"Se terminou, manda: `/feito {tarefa_id}`\n"
                  f"Se o TDAH te levou pra outro lugar, respira e volta pra cá! ⚓",
             parse_mode='Markdown'
-        )    
-
-async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Busca tarefas no banco persistente"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, descricao, status FROM tarefas')
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await update.message.reply_text("Sua lista está limpa!")
-        return
-
-    texto = "📋 *Tarefas Guardadas:* \n\n"
-    for row in rows:
-        emoji = "✅" if row[2] == 'concluida' else "⏳"
-        texto += f"{emoji} {row[0]}. {row[1]}\n"
-
-    await update.message.reply_text(texto, parse_mode='Markdown')
-
-async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Atualiza o status no banco"""
-    if not context.args:
-        await update.message.reply_text("Qual o número da tarefa?")
-        return
-
-    try:
-        tarefa_id = int(context.args[0])
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE tarefas SET status = 'concluida' WHERE id = ?", (tarefa_id,))
-        conn.commit()
-        
-        if cursor.rowcount > 0:
-            await update.message.reply_text(f"🎉 Boa, Leo! Tarefa {tarefa_id} concluída!")
-        else:
-            await update.message.reply_text("Não achei esse ID.")
-        
-        conn.close()
-    except ValueError:
-        await update.message.reply_text("Mande apenas o número.")
-
-async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Incentivo básico"""
-    await update.message.reply_text("Recebi! 📝 Para salvar como tarefa: /tarefa " + update.message.text)
-
-# ============================================================
-# MENSAGENS AGENDADAS
-# ============================================================
+        )
 
 async def bom_dia(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.bot_data.get('meu_chat_id')
@@ -180,7 +76,83 @@ async def boa_noite(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text="🌙 *Dia encerrado.*\nComo foi o progresso hoje?", parse_mode='Markdown')
 
 # ============================================================
-# MAIN - EXECUÇÃO ISSO É PARA GERAR O BOT NO RAILWAY
+# COMANDOS DO TELEGRAM
+# ============================================================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Boas-vindas"""
+    chat_id = update.effective_chat.id
+    context.bot_data['meu_chat_id'] = chat_id 
+    await update.message.reply_text(
+        "👋 Leonardo pronto! Memória definitiva e cobrança ativa. 💾\n\n"
+        "📌 /tarefa — salvar algo\n"
+        "📋 /lista — ver tudo\n"
+        "✅ /feito — concluir (ex: /feito 1)\n",
+        parse_mode='Markdown'
+    )
+
+async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Salva a tarefa e agenda um lembrete de cobrança"""
+    if not context.args:
+        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Prospectar Upwork")
+        return
+
+    tarefa = ' '.join(context.args)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
+    tarefa_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    # Agenda a cobrança para daqui a 45 segundos para teste
+    context.job_queue.run_once(
+        cobranca_automatica, 
+        when=45, 
+        data={'chat_id': update.effective_chat.id, 'tarefa': tarefa, 'id': tarefa_id}
+    )
+
+    await update.message.reply_text(
+        f"✅ Gravado: *{tarefa}*\n\n"
+        "⏳ Vou te cobrar em 45 segundos para testarmos!",
+        parse_mode='Markdown'
+    )
+
+async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, descricao, status FROM tarefas')
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows:
+        await update.message.reply_text("Sua lista está limpa!")
+        return
+    texto = "📋 *Tarefas Guardadas:* \n\n"
+    for row in rows:
+        emoji = "✅" if row[2] == 'concluida' else "⏳"
+        texto += f"{emoji} {row[0]}. {row[1]}\n"
+    await update.message.reply_text(texto, parse_mode='Markdown')
+
+async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Qual o número da tarefa?")
+        return
+    try:
+        tarefa_id = int(context.args[0])
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tarefas SET status = 'concluida' WHERE id = ?", (tarefa_id,))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"🎉 Boa, Leo! Tarefa {tarefa_id} concluída!")
+    except ValueError:
+        await update.message.reply_text("Mande apenas o número.")
+
+async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Recebi! 📝 Para salvar como tarefa: /tarefa " + update.message.text)
+
+# ============================================================
+# MAIN
 # ============================================================
 
 def main():
