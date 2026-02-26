@@ -11,8 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
-# AJUSTE PARA O VOLUME DO RAILWAY
-# Se a pasta /app/data existir (no Railway), salva lá. Se não, salva local (tarefas.db).
+# Define o caminho do banco: prioriza o Volume do Railway (/app/data)
 DB_DIR = '/app/data'
 DB_PATH = os.path.join(DB_DIR, 'tarefas.db') if os.path.exists(DB_DIR) else 'tarefas.db'
 
@@ -40,28 +39,26 @@ init_db()
 # ============================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Primeiro contato — Boas-vindas"""
+    """Boas-vindas"""
     chat_id = update.effective_chat.id
     context.bot_data['meu_chat_id'] = chat_id 
 
     await update.message.reply_text(
-        "👋 Fala, Leonardo! Memória definitiva ativada. 💾\n\n"
-        "Com o Volume do Railway, suas tarefas não somem mais no deploy.\n\n"
-        "📌 /tarefa — adicionar uma tarefa\n"
-        "📋 /lista — ver suas tarefas\n"
-        "✅ /feito — marcar tarefa como concluída (ex: /feito 1)\n\n"
-        "Qual é a sua prioridade agora?",
+        "👋 Leonardo! Memória definitiva ativada. 💾\n\n"
+        "Suas tarefas agora estão seguras no Volume do Railway.\n\n"
+        "📌 /tarefa — salvar algo\n"
+        "📋 /lista — ver tudo\n"
+        "✅ /feito — concluir (ex: /feito 1)\n",
         parse_mode='Markdown'
     )
 
 async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Salva a tarefa no SQLite (dentro do Volume)"""
+    """Salva a tarefa no SQLite"""
     if not context.args:
-        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Prospectar Upwork")
+        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Revisar Upwork")
         return
 
     tarefa = ' '.join(context.args)
-    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('INSERT INTO tarefas (descricao) VALUES (?)', (tarefa,))
@@ -71,7 +68,7 @@ async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Gravado com segurança:\n📌 *{tarefa}*", parse_mode='Markdown')
 
 async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Busca tarefas no banco persistente e exibe"""
+    """Busca tarefas no banco persistente"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT id, descricao, status FROM tarefas')
@@ -87,13 +84,12 @@ async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         emoji = "✅" if row[2] == 'concluida' else "⏳"
         texto += f"{emoji} {row[0]}. {row[1]}\n"
 
-    texto += "\nPara concluir: `/feito ID`"
     await update.message.reply_text(texto, parse_mode='Markdown')
 
 async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Atualiza o status no banco"""
     if not context.args:
-        await update.message.reply_text("Me fala o número da tarefa! Ex: /feito 1")
+        await update.message.reply_text("Qual o número da tarefa?")
         return
 
     try:
@@ -106,27 +102,32 @@ async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cursor.rowcount > 0:
             await update.message.reply_text(f"🎉 Boa, Leo! Tarefa {tarefa_id} concluída!")
         else:
-            await update.message.reply_text("Não achei nenhuma tarefa com esse número.")
+            await update.message.reply_text("Não achei esse ID.")
         
         conn.close()
     except ValueError:
-        await update.message.reply_text("Mande apenas o número (ID) da tarefa.")
+        await update.message.reply_text("Mande apenas o número.")
 
 async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Encorajamento para TDAH"""
-    texto = update.message.text.lower()
-    gatilhos = ['não consigo', 'nao consigo', 'desisti', 'cansado', 'travado']
-
-    if any(p in texto for p in gatilhos):
-        await update.message.reply_text(
-            "Ei... respira. 💙\n\nO TDAH às vezes trava a gente. Qual o *menor passo* agora?",
-            parse_mode='Markdown'
-        )
-    else:
-        await update.message.reply_text("Recebi! 📝 Para salvar: /tarefa " + update.message.text)
+    """Incentivo básico"""
+    await update.message.reply_text("Recebi! 📝 Para salvar como tarefa: /tarefa " + update.message.text)
 
 # ============================================================
-# EXECUÇÃO
+# MENSAGENS AGENDADAS
+# ============================================================
+
+async def bom_dia(context: ContextTypes.DEFAULT_TYPE):
+    chat_id = context.bot_data.get('meu_chat_id')
+    if chat_id:
+        await context.bot.send_message(chat_id=chat_id, text="☀️ *Bom dia, Leonardo!*\nQual a meta única de hoje?", parse_mode='Markdown')
+
+async def boa_noite(context: ContextTypes.DEFAULT_TYPE):
+    chat_id = context.bot_data.get('meu_chat_id')
+    if chat_id:
+        await context.bot.send_message(chat_id=chat_id, text="🌙 *Dia encerrado.*\nComo foi o progresso hoje?", parse_mode='Markdown')
+
+# ============================================================
+# MAIN
 # ============================================================
 
 def main():
@@ -140,10 +141,10 @@ def main():
 
     # Agendamentos (Horário de Brasília)
     job_queue = app.job_queue
-    job_queue.run_daily(bom_dia, time=time(10, 0))   
-    job_queue.run_daily(boa_noite, time=time(1, 0))  
+    job_queue.run_daily(bom_dia, time=time(10, 0))   # 07:00 BRT
+    job_queue.run_daily(boa_noite, time=time(1, 0))  # 22:00 BRT
 
-    print(f"🤖 Bot rodando! Banco em: {DB_PATH}")
+    print(f"🤖 Bot rodando com volume em: {DB_PATH}")
     app.run_polling()
 
 if __name__ == '__main__':
