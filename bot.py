@@ -186,8 +186,9 @@ async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     notas_pessoais = ctx.get('notas', '')
     humor_atual = ctx.get('humor', '')
     objetivos = ctx.get('objetivos', '')
+    personalidade = ctx.get('personalidade', '')
 
-    system_prompt = f"""Você é o assistente direto do Leonardo. TDAH, único provedor, situação financeira difícil.
+    {personalidade if personalidade else "Máximo 3 linhas. Tom de amigo direto. Português informal. Nunca invente dados."}
 
 DADOS REAIS (não invente nada fora daqui):
 - Tarefas pendentes: {lista_tarefas}
