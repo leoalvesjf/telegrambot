@@ -2,6 +2,8 @@ import logging
 import sqlite3
 import os
 import re
+import json
+import base64
 import threading
 import httpx
 from datetime import datetime
@@ -23,13 +25,16 @@ def run_flask():
 # --- CONFIGURAÇÕES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+GITHUB_REPO = os.environ.get('GITHUB_REPO', 'leoalvesjf/telegrambot')
+CONTEXT_FILE = 'context.json'
+
 AI_MODELS = [
     "nvidia/nemotron-nano-9b-v2:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemma-3-27b-it:free",
     "openai/gpt-oss-20b:free",
     "openai/gpt-oss-120b:free",
-    "mistralai/mistral-small-3.2-24b-instruct:free",
 ]
 
 DB_DIR = '/app/data'
@@ -97,45 +102,138 @@ def get_tarefas_pendentes():
     conn.close()
     return rows
 
-# --- IA: CHAMAR OPENROUTER ---
+def get_ultimos_gastos(limite=5):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT tipo, descricao, valor, data FROM financeiro ORDER BY id DESC LIMIT ?', (limite,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+# --- GITHUB: LER E SALVAR CONTEXT.JSON ---
+async def ler_context_github() -> dict:
+    """Lê o context.json do GitHub"""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}/contents/{CONTEXT_FILE}",
+                headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github.v3+json"
+                }
+            )
+            if response.status_code == 200:
+                data = response.json()
+                content = base64.b64decode(data['content']).decode('utf-8')
+                return json.loads(content), data['sha']
+            else:
+                return {}, None
+    except Exception as e:
+        logging.error(f"Erro ao ler context.json: {e}")
+        return {}, None
+
+async def salvar_context_github(context_data: dict, sha: str = None):
+    """Salva o context.json no GitHub"""
+    try:
+        content = base64.b64encode(json.dumps(context_data, ensure_ascii=False, indent=2).encode()).decode()
+        payload = {
+            "message": f"update context - {datetime.now().strftime('%d/%m %H:%M')}",
+            "content": content
+        }
+        if sha:
+            payload["sha"] = sha
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.put(
+                f"https://api.github.com/repos/{GITHUB_REPO}/contents/{CONTEXT_FILE}",
+                headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github.v3+json"
+                },
+                json=payload
+            )
+        logging.info("✅ context.json salvo no GitHub")
+    except Exception as e:
+        logging.error(f"Erro ao salvar context.json: {e}")
+
+async def atualizar_context(chave: str, valor):
+    """Atualiza uma chave específica no context.json"""
+    ctx, sha = await ler_context_github()
+    ctx[chave] = valor
+    ctx['ultima_atualizacao'] = datetime.now().strftime('%d/%m/%Y %H:%M')
+    await salvar_context_github(ctx, sha)
+
+# --- IA: CHAMAR OPENROUTER COM CONTEXTO REAL ---
 async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
+    # Dados reais do banco
     tarefas = get_tarefas_pendentes()
     saldo = get_saldo_atual()
     meta = get_config('meta_financeira') or "não definida"
-    lista_tarefas = "\n".join([f"- {t[0]}. {t[1]}" + (f" (adiada: {t[2]})" if t[2] else "") for t in tarefas]) or "Nenhuma"
+    gastos = get_ultimos_gastos()
+
+    lista_tarefas = "\n".join([
+        f"- {t[0]}. {t[1]}" + (f" (adiada porque: {t[2]})" if t[2] else "")
+        for t in tarefas
+    ]) or "Nenhuma tarefa pendente"
+
+    lista_gastos = "\n".join([
+        f"- {g[3]} {g[1]}: R$ {g[2]:.2f}"
+        for g in gastos
+    ]) or "Nenhum gasto registrado"
+
+    # Lê contexto adicional do GitHub
+    ctx, _ = await ler_context_github()
+    notas_pessoais = ctx.get('notas', '')
+    humor_atual = ctx.get('humor', '')
+    objetivos = ctx.get('objetivos', '')
 
     system_prompt = f"""Você é o assistente direto do Leonardo. TDAH, único provedor, situação financeira difícil.
 
+DADOS REAIS (não invente nada fora daqui):
+- Tarefas pendentes: {lista_tarefas}
+- Saldo atual: R$ {saldo:.2f}
+- Meta financeira: R$ {meta}
+- Últimos gastos: {lista_gastos}
+- Notas pessoais: {notas_pessoais or 'nenhuma'}
+- Humor registrado: {humor_atual or 'não registrado'}
+- Objetivos: {objetivos or 'não registrado'}
+{contexto_extra}
+
 REGRAS ABSOLUTAS:
 - Máximo 3 linhas por resposta
-- Sem rodeios, sem "entendo sua frustração"
-- Seja direto: identifica o problema + dá UMA ação concreta
-- Tom: amigo próximo, não psicólogo
+- Nunca invente dados, só use o que está acima
+- Se não souber, diga "não tenho essa informação ainda"
+- Tom: amigo direto, não psicólogo
 - Português brasileiro informal
-
-CONTEXTO: Tarefas: {lista_tarefas} | Saldo: R$ {saldo:.2f} | Meta: R$ {meta}
-{contexto_extra}"""
+- Dê UMA ação concreta baseada nos dados reais"""
 
     for model in AI_MODELS:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     "https://openrouter.ai/api/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                    json={"model": model, "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": mensagem_usuario}
-                    ], "max_tokens": 500}
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": mensagem_usuario}
+                        ],
+                        "max_tokens": 300
+                    }
                 )
                 data = response.json()
                 if 'choices' in data:
-                    logging.info(f"✅ Modelo usado: {model}")
+                    logging.info(f"✅ Modelo: {model}")
                     return data['choices'][0]['message']['content']
         except Exception as e:
-            logging.warning(f"❌ Modelo {model} falhou: {e}")
+            logging.warning(f"❌ {model} falhou: {e}")
             continue
 
-    return "Estou com todos os modelos no limite agora 😅 Tenta em alguns minutos!"
+    return "Todos os modelos estão no limite agora. Tenta em alguns minutos! 😅"
 
 # --- ESTADO CONVERSACIONAL ---
 user_state = {}
@@ -148,20 +246,22 @@ async def checkin_horario(context: ContextTypes.DEFAULT_TYPE):
     if not tarefas:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="⏰ *CHECK-IN HORÁRIO*\n\nNenhuma tarefa pendente!\nUse /tarefa para adicionar algo.",
+            text="⏰ *CHECK-IN*\n\nNenhuma tarefa pendente. Use /tarefa para adicionar.",
             parse_mode='Markdown'
         )
         return
 
-    lista = "\n".join([f"• {t[0]}. {t[1]}" + (f"\n  ↳ _adiada: {t[2]}_" if t[2] else "") for t in tarefas])
+    lista = "\n".join([
+        f"• {t[0]}. {t[1]}" + (f"\n  ↳ _adiada: {t[2]}_" if t[2] else "")
+        for t in tarefas
+    ])
 
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
             f"⏰ *CHECK-IN HORÁRIO*\n\n"
-            f"Leo, suas tarefas pendentes:\n\n{lista}\n\n"
-            f"Está atuando em alguma agora?\n"
-            f"Responda *sim* ou me conta o que está te impedindo."
+            f"Leo, tarefas pendentes:\n\n{lista}\n\n"
+            f"Está atuando em alguma? Responda *sim* ou me conta o motivo."
         ),
         parse_mode='Markdown'
     )
@@ -175,37 +275,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jobs = context.job_queue.get_jobs_by_name('checkin_horario')
     if not jobs:
         context.job_queue.run_repeating(
-            checkin_horario,
-            interval=3600,
-            first=3600,
-            data={'chat_id': chat_id},
-            name='checkin_horario'
+            checkin_horario, interval=3600, first=3600,
+            data={'chat_id': chat_id}, name='checkin_horario'
         )
 
     saldo = get_config('saldo_inicial')
     if not saldo:
         user_state[chat_id] = {'aguardando': 'saldo_inicial'}
         await update.message.reply_text(
-            "👋 *Olá Leonardo!*\n\n"
-            "Para começar, me diz:\n"
-            "*Qual é o seu saldo atual em reais?*\n\nEx: `1500.00`",
+            "👋 *Olá Leonardo!*\n\nQual é seu saldo atual?\n"
+            "_(pode ser negativo, ex: `-244.50`)_",
             parse_mode='Markdown'
         )
     else:
         await update.message.reply_text(
-            "👋 *Leonardo, estou ativo!*\n\n"
+            "👋 *Estou ativo!*\n\n"
             "📌 /tarefa — adicionar tarefa\n"
             "📋 /lista — ver tarefas\n"
             "✅ /feito — concluir tarefa\n"
-            "💰 /saldo — ver saldo atual\n"
-            "📊 /extrato — ver lançamentos\n\n"
-            "Ou fala comigo normalmente! Estou aqui. 💙",
+            "💰 /saldo — ver saldo\n"
+            "📊 /extrato — ver lançamentos\n"
+            "📝 /nota — salvar nota pessoal\n"
+            "😊 /humor — registrar como está se sentindo\n\n"
+            "Ou fala comigo normalmente! 💙",
             parse_mode='Markdown'
         )
 
 async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Me fala a tarefa! Ex: /tarefa Ligar pro cliente")
+        await update.message.reply_text("Ex: /tarefa Ligar pro cliente")
         return
     tarefa = ' '.join(context.args)
     agora = datetime.now().strftime('%d/%m/%Y %H:%M')
@@ -216,13 +314,13 @@ async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
     await update.message.reply_text(
-        f"✅ Tarefa *{t_id}* adicionada:\n📌 {tarefa}\n\nTe cobro no próximo check-in! ⏰",
+        f"✅ Tarefa *{t_id}* adicionada: {tarefa}",
         parse_mode='Markdown'
     )
 
 async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Me fala o número! Ex: /feito 1")
+        await update.message.reply_text("Ex: /feito 1")
         return
     try:
         t_id = int(context.args[0])
@@ -231,7 +329,7 @@ async def marcar_feita(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("UPDATE tarefas SET status='concluida', motivo_adiamento=NULL WHERE id=?", (t_id,))
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"🎉 Arrasou, Leo! Tarefa *{t_id}* concluída!", parse_mode='Markdown')
+        await update.message.reply_text(f"🎉 Tarefa *{t_id}* concluída!", parse_mode='Markdown')
     except:
         await update.message.reply_text("Número inválido. Use /lista.")
 
@@ -242,14 +340,14 @@ async def listar_tarefas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = cursor.fetchall()
     conn.close()
     if not rows:
-        await update.message.reply_text("Nenhuma tarefa ainda! Use /tarefa.")
+        await update.message.reply_text("Nenhuma tarefa! Use /tarefa.")
         return
-    texto = "📋 *Suas tarefas:*\n\n"
+    texto = "📋 *Tarefas:*\n\n"
     for r in rows:
         emoji = "✅" if r[2] == 'concluida' else "⏳"
         texto += f"{emoji} *{r[0]}.* {r[1]}"
         if r[3]:
-            texto += f"\n   ↳ _adiada: {r[3]}_"
+            texto += f"\n   ↳ _{r[3]}_"
         texto += "\n"
     await update.message.reply_text(texto, parse_mode='Markdown')
 
@@ -258,9 +356,11 @@ async def ver_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     meta = get_config('meta_financeira')
     texto = f"💰 *Saldo atual:* R$ {saldo:.2f}"
     if meta:
-        texto += f"\n🎯 *Meta:* R$ {float(meta):.2f}"
-        pct = (saldo / float(meta)) * 100
-        texto += f"\n📈 *Progresso:* {pct:.1f}%"
+        meta_f = float(meta)
+        texto += f"\n🎯 *Meta:* R$ {meta_f:.2f}"
+        if meta_f > 0:
+            pct = (saldo / meta_f) * 100
+            texto += f"\n📈 *Progresso:* {pct:.1f}%"
     await update.message.reply_text(texto, parse_mode='Markdown')
 
 async def ver_extrato(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -270,75 +370,92 @@ async def ver_extrato(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = cursor.fetchall()
     conn.close()
     if not rows:
-        await update.message.reply_text("Nenhum lançamento ainda!\nEx: _'gastei 20 reais com almoço'_", parse_mode='Markdown')
+        await update.message.reply_text("Nenhum lançamento ainda!\nEx: _gastei 20 reais com almoço_", parse_mode='Markdown')
         return
     texto = "📊 *Extrato:*\n\n"
     for r in rows:
         emoji = "📈" if r[0] == 'entrada' else "📉"
         texto += f"{emoji} {r[3]} — {r[1]}: *R$ {r[2]:.2f}*\n"
     saldo = get_saldo_atual()
-    texto += f"\n💰 *Saldo atual: R$ {saldo:.2f}*"
+    texto += f"\n💰 *Saldo: R$ {saldo:.2f}*"
     await update.message.reply_text(texto, parse_mode='Markdown')
 
-# --- RESPOSTAS LIVRES COM IA ---
+async def salvar_nota(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Ex: /nota preciso pagar boleto amanhã")
+        return
+    nota = ' '.join(context.args)
+    await atualizar_context('notas', nota)
+    await update.message.reply_text(f"📝 Nota salva: _{nota}_", parse_mode='Markdown')
+
+async def registrar_humor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Ex: /humor travado hoje, muito cansado")
+        return
+    humor = ' '.join(context.args)
+    await atualizar_context('humor', f"{datetime.now().strftime('%d/%m %H:%M')} — {humor}")
+    await update.message.reply_text(f"😊 Humor registrado: _{humor}_", parse_mode='Markdown')
+
+# --- RESPOSTAS LIVRES ---
 async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     texto = update.message.text
     texto_lower = texto.lower()
     estado = user_state.get(chat_id, {})
 
-    # --- FLUXO: saldo inicial ---
+    # --- saldo inicial ---
     if estado.get('aguardando') == 'saldo_inicial':
         try:
-            numeros = re.findall(r'\d+[.,]?\d*', texto)
+            numeros = re.findall(r'-?\d+[.,]?\d*', texto)
             saldo = float(numeros[0].replace(',', '.'))
             set_config('saldo_inicial', str(saldo))
+            await atualizar_context('saldo_inicial', saldo)
             user_state[chat_id] = {'aguardando': 'meta_financeira'}
             await update.message.reply_text(
-                f"✅ Saldo de *R$ {saldo:.2f}* cadastrado!\n\nAgora me fala sua *meta financeira*.\nEx: `5000.00`",
+                f"✅ Saldo de *R$ {saldo:.2f}* cadastrado!\nAgora me fala sua *meta financeira*:",
                 parse_mode='Markdown'
             )
         except:
-            await update.message.reply_text("Não entendi. Manda só o número. Ex: `1500.00`", parse_mode='Markdown')
+            await update.message.reply_text("Não entendi. Ex: `-244.50` ou `1500`", parse_mode='Markdown')
         return
 
-    # --- FLUXO: meta financeira ---
+    # --- meta financeira ---
     if estado.get('aguardando') == 'meta_financeira':
         try:
-            numeros = re.findall(r'\d+[.,]?\d*', texto)
+            numeros = re.findall(r'-?\d+[.,]?\d*', texto)
             meta = float(numeros[0].replace(',', '.'))
             set_config('meta_financeira', str(meta))
+            await atualizar_context('meta_financeira', meta)
             user_state[chat_id] = {}
             await update.message.reply_text(
-                f"🎯 Meta de *R$ {meta:.2f}* definida!\n\nAgora pode falar comigo normalmente. Estou aqui! 💙",
+                f"🎯 Meta de *R$ {meta:.2f}* definida! Estou pronto. 💙",
                 parse_mode='Markdown'
             )
         except:
-            await update.message.reply_text("Não entendi. Manda só o número. Ex: `5000.00`", parse_mode='Markdown')
+            await update.message.reply_text("Não entendi. Ex: `5000`", parse_mode='Markdown')
         return
 
-    # --- FLUXO: resposta do checkin ---
+    # --- resposta do checkin ---
     if estado.get('aguardando') == 'resposta_checkin':
         if any(p in texto_lower for p in ['sim', 'estou', 'tô', 'to', 'trabalhando', 'fazendo']):
             user_state[chat_id] = {}
-            await update.message.reply_text("💪 Ótimo! Foco total. Te checo na próxima hora!")
+            await update.message.reply_text("💪 Ótimo! Foco total.")
         else:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute("UPDATE tarefas SET motivo_adiamento=? WHERE status='pendente'", (texto,))
             conn.commit()
             conn.close()
+            await atualizar_context('ultimo_motivo_adiamento', texto)
             user_state[chat_id] = {}
-
-            # IA responde ao motivo com empatia
             resposta = await perguntar_ia(
                 texto,
-                contexto_extra=f"Leonardo acabou de dizer que não está conseguindo trabalhar nas tarefas porque: {texto}. Responda com empatia e sugira um pequeno passo."
+                contexto_extra=f"Leonardo disse que não está conseguindo trabalhar porque: {texto}. Responda com no máximo 2 linhas, empático e direto."
             )
-            await update.message.reply_text(f"📝 Motivo anotado.\n\n{resposta}")
+            await update.message.reply_text(f"📝 Anotei.\n\n{resposta}")
         return
 
-    # --- LANÇAMENTO FINANCEIRO ---
+    # --- lançamento financeiro ---
     palavras_saida = ['gastei', 'paguei', 'comprei', 'debitou', 'saiu']
     palavras_entrada = ['recebi', 'entrou', 'ganhei', 'depositei']
     tipo = None
@@ -362,14 +479,15 @@ async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         saldo = get_saldo_atual()
+        await atualizar_context('ultimo_lancamento', f"{agora} — {texto}: R$ {valor:.2f}")
         emoji = "📉" if tipo == 'saida' else "📈"
         await update.message.reply_text(
-            f"{emoji} Lançado: *R$ {valor:.2f}*\n💰 Saldo atual: *R$ {saldo:.2f}*",
+            f"{emoji} *R$ {valor:.2f}* lançado!\n💰 Saldo: *R$ {saldo:.2f}*",
             parse_mode='Markdown'
         )
         return
 
-    # --- IA RESPONDE TUDO MAIS ---
+    # --- IA responde com contexto real ---
     await update.message.reply_text("⏳ Pensando...")
     resposta = await perguntar_ia(texto)
     await update.message.reply_text(resposta)
@@ -384,9 +502,11 @@ def main():
     app.add_handler(CommandHandler("feito", marcar_feita))
     app.add_handler(CommandHandler("saldo", ver_saldo))
     app.add_handler(CommandHandler("extrato", ver_extrato))
+    app.add_handler(CommandHandler("nota", salvar_nota))
+    app.add_handler(CommandHandler("humor", registrar_humor))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, resposta_livre))
 
-    logging.info("🤖 BabaBot_26 com IA integrada — Operacional!")
+    logging.info("🤖 BabaBot_26 com contexto GitHub — Operacional!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
