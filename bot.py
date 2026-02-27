@@ -24,18 +24,10 @@ def run_flask():
 
 # --- CONFIGURAÇÕES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'leoalvesjf/telegrambot')
 CONTEXT_FILE = 'context.json'
-
-AI_MODELS = [
-    "nvidia/nemotron-nano-9b-v2:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
-    "openai/gpt-oss-20b:free",
-    "openai/gpt-oss-120b:free",
-]
 
 DB_DIR = '/app/data'
 DB_PATH = os.path.join(DB_DIR, 'bot.db') if os.path.exists(DB_DIR) else 'bot.db'
@@ -148,7 +140,7 @@ async def salvar_context_github(context_data: dict, sha: str = None):
                 },
                 json=payload
             )
-        logging.info("✅ context.json salvo no GitHub")
+        logging.info("context.json salvo no GitHub")
     except Exception as e:
         logging.error(f"Erro ao salvar context.json: {e}")
 
@@ -158,11 +150,11 @@ async def atualizar_context(chave: str, valor):
     ctx['ultima_atualizacao'] = datetime.now().strftime('%d/%m/%Y %H:%M')
     await salvar_context_github(ctx, sha)
 
-# --- IA: CHAMAR OPENROUTER COM CONTEXTO REAL ---
+# --- IA: GEMINI ---
 async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     tarefas = get_tarefas_pendentes()
     saldo = get_saldo_atual()
-    meta = get_config('meta_financeira') or "não definida"
+    meta = get_config('meta_financeira') or "nao definida"
     gastos = get_ultimos_gastos()
 
     lista_tarefas = "\n".join([
@@ -176,53 +168,51 @@ async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     ]) or "Nenhum gasto registrado"
 
     ctx, _ = await ler_context_github()
+    personalidade = ctx.get('personalidade', '')
     notas_pessoais = ctx.get('notas', '')
     humor_atual = ctx.get('humor', '')
     objetivos = ctx.get('objetivos', '')
-    personalidade = ctx.get('personalidade', '')
+    perfil = ctx.get('perfil', {})
 
-    regras = personalidade if personalidade else "Maximo 3 linhas. Tom de amigo direto. Portugues informal. Nunca invente dados."
+    regras = personalidade if personalidade else "Maximo 2 frases. Tom de amigo direto. Portugues informal. Nunca invente dados."
 
     system_prompt = (
         f"{regras}\n\n"
-        f"DADOS REAIS (nao invente nada fora daqui):\n"
+        f"PERFIL DO USUARIO:\n{json.dumps(perfil, ensure_ascii=False)}\n\n"
+        f"DADOS REAIS:\n"
         f"- Tarefas pendentes: {lista_tarefas}\n"
         f"- Saldo atual: R$ {saldo:.2f}\n"
-        f"- Meta financeira: R$ {meta}\n"
+        f"- Meta: R$ {meta}\n"
         f"- Ultimos gastos: {lista_gastos}\n"
-        f"- Notas pessoais: {notas_pessoais or 'nenhuma'}\n"
-        f"- Humor registrado: {humor_atual or 'nao registrado'}\n"
+        f"- Notas: {notas_pessoais or 'nenhuma'}\n"
+        f"- Humor: {humor_atual or 'nao registrado'}\n"
         f"- Objetivos: {objetivos or 'nao registrado'}\n"
         f"{contexto_extra}"
     )
 
-    for model in AI_MODELS:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "Content-Type": "application/json"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "system_instruction": {
+                        "parts": [{"text": system_prompt}]
                     },
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": mensagem_usuario}
-                        ],
-                        "max_tokens": 300
+                    "contents": [
+                        {"role": "user", "parts": [{"text": mensagem_usuario}]}
+                    ],
+                    "generationConfig": {
+                        "maxOutputTokens": 200,
+                        "temperature": 0.5
                     }
-                )
-                data = response.json()
-                if 'choices' in data:
-                    logging.info(f"Modelo usado: {model}")
-                    return data['choices'][0]['message']['content']
-        except Exception as e:
-            logging.warning(f"Modelo {model} falhou: {e}")
-            continue
-
-    return "Todos os modelos estao no limite agora. Tenta em alguns minutos!"
+                }
+            )
+            data = response.json()
+            return data['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        logging.error(f"Erro Gemini: {e}")
+        return "Tive um problema agora. Tenta de novo!"
 
 # --- ESTADO CONVERSACIONAL ---
 user_state = {}
@@ -247,11 +237,7 @@ async def checkin_horario(context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=(
-            f"*CHECK-IN HORARIO*\n\n"
-            f"Leo, tarefas pendentes:\n\n{lista}\n\n"
-            f"Esta atuando em alguma? Responda *sim* ou me conta o motivo."
-        ),
+        text=f"*CHECK-IN HORARIO*\n\nLeo, tarefas pendentes:\n\n{lista}\n\nEsta atuando em alguma? Responda *sim* ou me conta o motivo.",
         parse_mode='Markdown'
     )
     user_state[chat_id] = {'aguardando': 'resposta_checkin'}
@@ -272,8 +258,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not saldo:
         user_state[chat_id] = {'aguardando': 'saldo_inicial'}
         await update.message.reply_text(
-            "*Ola Leonardo!*\n\nQual e seu saldo atual?\n"
-            "_(pode ser negativo, ex: -244.50)_",
+            "*Ola Leonardo!*\n\nQual e seu saldo atual?\n_(pode ser negativo, ex: -244.50)_",
             parse_mode='Markdown'
         )
     else:
@@ -286,8 +271,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/extrato - ver lancamentos\n"
             "/nota - salvar nota pessoal\n"
             "/humor - registrar como esta se sentindo\n\n"
-            "Ou fala comigo normalmente!",
-            parse_mode='Markdown'
+            "Ou fala comigo normalmente!"
         )
 
 async def adicionar_tarefa(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,7 +340,7 @@ async def ver_extrato(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = cursor.fetchall()
     conn.close()
     if not rows:
-        await update.message.reply_text("Nenhum lancamento ainda!\nEx: gastei 20 reais com almoco")
+        await update.message.reply_text("Nenhum lancamento!\nEx: gastei 20 reais com almoco")
         return
     texto = "*Extrato:*\n\n"
     for r in rows:
@@ -430,7 +414,7 @@ async def resposta_livre(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state[chat_id] = {}
             resposta = await perguntar_ia(
                 texto,
-                contexto_extra=f"Leonardo nao esta conseguindo trabalhar porque: {texto}. Responda em no maximo 2 linhas."
+                contexto_extra=f"Leonardo nao esta conseguindo trabalhar porque: {texto}. Responda em no maximo 2 frases."
             )
             await update.message.reply_text(f"Anotei.\n\n{resposta}")
         return
@@ -484,7 +468,7 @@ def main():
     app.add_handler(CommandHandler("humor", registrar_humor))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, resposta_livre))
 
-    logging.info("BabaBot_26 operacional!")
+    logging.info("BabaBot_26 com Gemini operacional!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
