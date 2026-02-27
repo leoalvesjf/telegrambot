@@ -23,7 +23,8 @@ def run_flask():
 # --- CONFIGURAÇÕES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
-AI_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
+#AI_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
+AI_MODEL = "nvidia/nemotron-nano-9b-v2:free"
 
 DB_DIR = '/app/data'
 DB_PATH = os.path.join(DB_DIR, 'bot.db') if os.path.exists(DB_DIR) else 'bot.db'
