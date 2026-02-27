@@ -24,7 +24,7 @@ def run_flask():
 
 # --- CONFIGURAÇÕES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 GITHUB_REPO = os.environ.get('GITHUB_REPO', 'leoalvesjf/telegrambot')
 CONTEXT_FILE = 'context.json'
@@ -150,7 +150,7 @@ async def atualizar_context(chave: str, valor):
     ctx['ultima_atualizacao'] = datetime.now().strftime('%d/%m/%Y %H:%M')
     await salvar_context_github(ctx, sha)
 
-# --- IA: GEMINI ---
+# --- IA: CLAUDE HAIKU ---
 async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     tarefas = get_tarefas_pendentes()
     saldo = get_saldo_atual()
@@ -179,7 +179,7 @@ async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     system_prompt = (
         f"{regras}\n\n"
         f"PERFIL DO USUARIO:\n{json.dumps(perfil, ensure_ascii=False)}\n\n"
-        f"DADOS REAIS:\n"
+        f"DADOS REAIS (nao invente nada fora daqui):\n"
         f"- Tarefas pendentes: {lista_tarefas}\n"
         f"- Saldo atual: R$ {saldo:.2f}\n"
         f"- Meta: R$ {meta}\n"
@@ -193,25 +193,25 @@ async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}",
-                headers={"Content-Type": "application/json"},
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
                 json={
-                    "system_instruction": {
-                        "parts": [{"text": system_prompt}]
-                    },
-                    "contents": [
-                        {"role": "user", "parts": [{"text": mensagem_usuario}]}
-                    ],
-                    "generationConfig": {
-                        "maxOutputTokens": 200,
-                        "temperature": 0.5
-                    }
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 300,
+                    "system": system_prompt,
+                    "messages": [
+                        {"role": "user", "content": mensagem_usuario}
+                    ]
                 }
             )
             data = response.json()
-            return data['candidates'][0]['content']['parts'][0]['text']
+            return data['content'][0]['text']
     except Exception as e:
-        logging.error(f"Erro Gemini: {e}")
+        logging.error(f"Erro Claude: {e}")
         return "Tive um problema agora. Tenta de novo!"
 
 # --- ESTADO CONVERSACIONAL ---
@@ -468,7 +468,7 @@ def main():
     app.add_handler(CommandHandler("humor", registrar_humor))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, resposta_livre))
 
-    logging.info("BabaBot_26 com Gemini operacional!")
+    logging.info("BabaBot_26 com Claude Haiku operacional!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
