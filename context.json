@@ -1,9 +1,20 @@
 {
+  "perfil": {
+    "nome": "Leonardo Alves",
+    "idade": 40,
+    "familia": "casado, 2 filhos, 1 cachorro",
+    "moradia": "aluguel",
+    "trabalho": "Product Owner na Ericsson desde 2017",
+    "formacao": "Engenharia de Software - Estácio"
+  },
+  "situacao_atual": "único provedor, situação financeira crítica, endividado",
+  "sonhos": "viver de internet, rendas passivas, múltiplas fontes de renda",
+  "objetivos": "conseguir clientes freela no Upwork, sair do negativo",
+  "upwork": "perfil criado, aguardando $15 para Connects",
   "notas": "",
   "humor": "",
-  "objetivos": "Ficar positivo financeiramente. Conseguir clientes freela no Upwork.",
-  "saldo_inicial": 0,
-  "meta_financeira": 0,
+  "saldo_inicial": -244.50,
+  "meta_financeira": 1500,
   "ultimo_lancamento": "",
   "ultimo_motivo_adiamento": "",
   "ultima_atualizacao": ""
