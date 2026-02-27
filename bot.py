@@ -23,8 +23,14 @@ def run_flask():
 # --- CONFIGURAÇÕES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
-#AI_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
-AI_MODEL = "nvidia/nemotron-nano-9b-v2:free"
+AI_MODELS = [
+    "nvidia/nemotron-nano-9b-v2:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-3-27b-it:free",
+    "openai/gpt-oss-20b:free",
+    "openai/gpt-oss-120b:free",
+    "mistralai/mistral-small-3.2-24b-instruct:free",
+]
 
 DB_DIR = '/app/data'
 DB_PATH = os.path.join(DB_DIR, 'bot.db') if os.path.exists(DB_DIR) else 'bot.db'
@@ -96,49 +102,33 @@ async def perguntar_ia(mensagem_usuario: str, contexto_extra: str = "") -> str:
     tarefas = get_tarefas_pendentes()
     saldo = get_saldo_atual()
     meta = get_config('meta_financeira') or "não definida"
+    lista_tarefas = "\n".join([f"- {t[0]}. {t[1]}" + (f" (adiada: {t[2]})" if t[2] else "") for t in tarefas]) or "Nenhuma"
 
-    lista_tarefas = "\n".join([f"- {t[0]}. {t[1]}" + (f" (adiada: {t[2]})" if t[2] else "") for t in tarefas]) or "Nenhuma tarefa pendente"
-
-    system_prompt = f"""Você é o assistente pessoal do Leonardo, um engenheiro de software com TDAH.
-Você é seu secretário, parceiro e apoio emocional.
-
-CONTEXTO ATUAL:
-- Tarefas pendentes: {lista_tarefas}
-- Saldo atual: R$ {saldo:.2f}
-- Meta financeira: R$ {meta}
+    system_prompt = f"""Você é o assistente pessoal do Leonardo, engenheiro de software com TDAH.
+CONTEXTO: Tarefas: {lista_tarefas} | Saldo: R$ {saldo:.2f} | Meta: R$ {meta}
 {contexto_extra}
+Responda curto, direto, em português, com empatia. Máximo 3 parágrafos."""
 
-COMO VOCÊ AGE:
-- Respostas curtas e diretas — nunca mais de 3 parágrafos
-- Tom humano, caloroso, sem ser fake
-- Foca em UMA coisa por vez
-- Quando ele estiver travado, sugere o menor passo possível
-- Nunca julga, sempre encoraja
-- Lembra que ele tem TDAH e precisa de estrutura externa
-- Responde sempre em português brasileiro"""
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": AI_MODEL,
-                    "messages": [
+    for model in AI_MODELS:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": mensagem_usuario}
-                    ],
-                    "max_tokens": 500
-                }
-            )
-            data = response.json()
-            return data['choices'][0]['message']['content']
-    except Exception as e:
-        logging.error(f"Erro na IA: {e}")
-        return "Tive um probleminha pra pensar agora 😅 Tenta de novo em instantes!"
+                    ], "max_tokens": 500}
+                )
+                data = response.json()
+                if 'choices' in data:
+                    logging.info(f"✅ Modelo usado: {model}")
+                    return data['choices'][0]['message']['content']
+        except Exception as e:
+            logging.warning(f"❌ Modelo {model} falhou: {e}")
+            continue
+
+    return "Estou com todos os modelos no limite agora 😅 Tenta em alguns minutos!"
 
 # --- ESTADO CONVERSACIONAL ---
 user_state = {}
